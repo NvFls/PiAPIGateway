@@ -185,15 +185,27 @@ export class GatewayServer {
       };
 
       // 转发请求（流式）
-      const response = await fetch(targetUrl, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${realProvider.apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(forwardBody),
-        agent: targetUrl.startsWith("https") ? httpsAgent : undefined,
-      });
+      console.log(`[Gateway] 转发到: ${targetUrl}, 模型: ${route.model}`);
+      
+      let response: Response;
+      try {
+        response = await fetch(targetUrl, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${realProvider.apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(forwardBody),
+          agent: targetUrl.startsWith("https") ? httpsAgent : undefined,
+        });
+      } catch (fetchErr) {
+        console.error(`[Gateway] 请求失败: ${targetUrl}, 错误: ${fetchErr}`);
+        res.writeHead(502, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: `Bad Gateway: ${fetchErr}` }));
+        return;
+      }
+
+      console.log(`[Gateway] 响应状态: ${response.status}`);
 
       // 设置响应头
       res.writeHead(response.status, {

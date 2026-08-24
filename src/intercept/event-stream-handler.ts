@@ -3,16 +3,15 @@
  */
 
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
-import { loadConfig } from "../config.js";
 
 export async function handleVirtualSupplierRequest(
   vsName: string,
+  config: any,
   modelId: string,
   messages: any[],
   doStream: boolean
 ) {
-  const config = loadConfig();
-  const gatewayUrl = `http://localhost:${config.port}/v1/chat/completions`;
+  const gatewayUrl = `http://127.0.0.1:${config.port}/v1/chat/completions`;
   
   const eventStream = createAssistantMessageEventStream();
   
