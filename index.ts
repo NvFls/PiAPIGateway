@@ -18,12 +18,23 @@ export default function (pi: ExtensionAPI) {
   // 注册虚拟供应商（扩展加载时，会话恢复之前）
   registerVirtualSuppliers(pi, config);
 
-  // 启动网关
+  // 启动网关（仅当选择虚拟供应商时）
   pi.on("session_start", async (_event, ctx) => {
-    server = new GatewayServer(config);
-    await server.start();
-    registerVirtualSuppliers(pi, config); // 重新注册（端口可能已更改）
-    ctx.ui.notify(`API 网关已启动: http://localhost:${config.port}`, "info");
+    // 检查当前选择的供应商是否是虚拟供应商
+    const currentModel = ctx.model;
+    const isVirtualSupplier = currentModel && Object.keys(config.virtualSuppliers).some(
+      vsName => currentModel.provider === `local-gateway-${vsName}`
+    );
+    
+    if (isVirtualSupplier) {
+      console.log("[Gateway] 当前使用虚拟供应商，启动网关");
+      server = new GatewayServer(config);
+      await server.start();
+      registerVirtualSuppliers(pi, config);
+      ctx.ui.notify(`API 网关已启动: http://localhost:${config.port}`, "info");
+    } else {
+      console.log("[Gateway] 当前使用正常供应商，网关不启动");
+    }
   });
 
   // 停止网关
