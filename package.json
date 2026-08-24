@@ -1,0 +1,11 @@
+{
+  "name": "pi-api-gateway",
+  "version": "2.0.0",
+  "description": "API Gateway Plugin for Pi - 虚拟供应商 + HTTP 网关",
+  "main": "index.ts",
+  "type": "module",
+  "scripts": {},
+  "keywords": ["pi-plugin", "api-gateway"],
+  "author": "",
+  "license": "MIT"
+}
