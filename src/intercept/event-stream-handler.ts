@@ -1,5 +1,5 @@
 /**
- * Event Stream Handler - 正确版本
+ * Event Stream Handler - 简化版，不干扰 Pi
  */
 
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
@@ -10,16 +10,12 @@ export async function handleVirtualSupplierRequest(
   modelId: string,
   messages: any[],
   doStream: boolean,
-  signal?: AbortSignal  // ← 新增中止信号
+  signal?: AbortSignal
 ) {
-  const gatewayUrl = `http://127.0.0.1:${config.port}/v1/chat/completions`;
-  
   const eventStream = createAssistantMessageEventStream();
   
-  // 完整的供应商注册名
   const providerName = `local-gateway-${vsName}`;
   
-  // 创建 output 对象，所有事件共享
   const output: any = {
     role: "assistant",
     content: [],
@@ -27,85 +23,55 @@ export async function handleVirtualSupplierRequest(
     provider: providerName,
     model: modelId,
     usage: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 0,
+      input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
     },
     stopReason: "pending",
     timestamp: Date.now(),
   };
   
-  let thinkingBlock: any = null;
-  let textBlock: any = null;
-  let thinkingCompleted = false;
-  
-  const getContentIndex = (block: any) => output.content.indexOf(block);
-  
+  // 异步处理，不阻塞 Pi
   (async () => {
     try {
-      // 检查是否已中止
       if (signal?.aborted) {
-        eventStream.push({
-          type: "error",
-          reason: "aborted",
-          error: { ...output, stopReason: "aborted", errorMessage: "Request aborted" }
-        });
+        eventStream.push({ type: "error", reason: "aborted", error: { ...output, stopReason: "aborted", errorMessage: "Aborted" } });
         return;
       }
+      
+      const gatewayUrl = `http://127.0.0.1:${config.port}/v1/chat/completions`;
       
       const response = await fetch(gatewayUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ virtualSupplier: vsName, model: modelId, messages, doStream: true }),
-        signal,  // ← 传递中止信号
+        signal,
       });
-      
-      // 检查是否已中止
+
       if (signal?.aborted) {
-        eventStream.push({
-          type: "error",
-          reason: "aborted",
-          error: { ...output, stopReason: "aborted", errorMessage: "Request aborted" }
-        });
+        eventStream.push({ type: "error", reason: "aborted", error: { ...output, stopReason: "aborted", errorMessage: "Aborted" } });
         return;
       }
 
       if (!response.ok) {
-        eventStream.push({
-          type: "error",
-          reason: "error",
-          error: { ...output, stopReason: "error", errorMessage: `HTTP ${response.status}` }
-        });
+        eventStream.push({ type: "error", reason: "error", error: { ...output, stopReason: "error", errorMessage: `HTTP ${response.status}` } });
         return;
       }
 
       const reader = response.body?.getReader();
       if (!reader) {
-        eventStream.push({
-          type: "error",
-          reason: "error",
-          error: { ...output, stopReason: "error", errorMessage: "No body" }
-        });
+        eventStream.push({ type: "error", reason: "error", error: { ...output, stopReason: "error", errorMessage: "No body" } });
         return;
       }
 
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      // start
       eventStream.push({ type: "start", partial: output });
 
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let text = "";
+
       while (true) {
-        // 检查是否已中止
         if (signal?.aborted) {
-          eventStream.push({
-            type: "error",
-            reason: "aborted",
-            error: { ...output, stopReason: "aborted", errorMessage: "Request aborted" }
-          });
+          eventStream.push({ type: "error", reason: "aborted", error: { ...output, stopReason: "aborted", errorMessage: "Aborted" } });
           return;
         }
         
@@ -123,54 +89,15 @@ export async function handleVirtualSupplierRequest(
 
           try {
             const json = JSON.parse(data);
-            const delta = json.choices?.[0]?.delta;
-            
-            // 思维链
-            if (delta?.reasoning_content && !thinkingCompleted) {
-              if (!thinkingBlock) {
-                thinkingBlock = { type: "thinking", thinking: "" };
-                output.content.push(thinkingBlock);
-                eventStream.push({
-                  type: "thinking_start",
-                  contentIndex: getContentIndex(thinkingBlock),
-                  partial: output
-                });
-              }
-              thinkingBlock.thinking += delta.reasoning_content;
-              eventStream.push({
-                type: "thinking_delta",
-                contentIndex: getContentIndex(thinkingBlock),
-                delta: delta.reasoning_content,
-                partial: output
-              });
-            }
-            
-            // 正文
-            if (delta?.content) {
-              if (thinkingBlock && !thinkingCompleted) {
-                thinkingCompleted = true;
-                eventStream.push({
-                  type: "thinking_end",
-                  contentIndex: getContentIndex(thinkingBlock),
-                  content: thinkingBlock.thinking,
-                  partial: output
-                });
-              }
-              if (!textBlock) {
-                textBlock = { type: "text", text: "" };
-                output.content.push(textBlock);
-                eventStream.push({
-                  type: "text_start",
-                  contentIndex: getContentIndex(textBlock),
-                  partial: output
-                });
-              }
-              textBlock.text += delta.content;
+            const content = json.choices?.[0]?.delta?.content;
+
+            if (content) {
+              text += content;
               eventStream.push({
                 type: "text_delta",
-                contentIndex: getContentIndex(textBlock),
-                delta: delta.content,
-                partial: output
+                contentIndex: 0,
+                delta: content,
+                partial: { ...output, content: [{ type: "text", text }] }
               });
             }
           } catch {
@@ -179,36 +106,22 @@ export async function handleVirtualSupplierRequest(
         }
       }
 
-      // done（检查是否已中止）
       if (signal?.aborted) {
-        eventStream.push({
-          type: "error",
-          reason: "aborted",
-          error: { ...output, stopReason: "aborted", errorMessage: "Request aborted" }
-        });
+        eventStream.push({ type: "error", reason: "aborted", error: { ...output, stopReason: "aborted", errorMessage: "Aborted" } });
         return;
       }
       
       eventStream.push({
         type: "done",
         reason: "stop",
-        message: { ...output, stopReason: "stop", timestamp: Date.now() }
+        message: { ...output, content: [{ type: "text", text }], stopReason: "stop", timestamp: Date.now() }
       });
 
     } catch (err) {
-      // 中止导致的错误
       if (signal?.aborted || (err instanceof Error && err.name === "AbortError")) {
-        eventStream.push({
-          type: "error",
-          reason: "aborted",
-          error: { ...output, stopReason: "aborted", errorMessage: "Request aborted" }
-        });
+        eventStream.push({ type: "error", reason: "aborted", error: { ...output, stopReason: "aborted", errorMessage: "Aborted" } });
       } else {
-        eventStream.push({
-          type: "error",
-          reason: "error",
-          error: { ...output, stopReason: "error", errorMessage: String(err) }
-        });
+        eventStream.push({ type: "error", reason: "error", error: { ...output, stopReason: "error", errorMessage: String(err) } });
       }
     }
   })();
