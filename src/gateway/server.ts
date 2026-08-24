@@ -72,9 +72,15 @@ export class GatewayServer {
 
   async start(): Promise<void> {
     return new Promise((resolve, reject) => {
-      let port = this.config.port;
+      // 使用基于进程ID的唯一端口，避免多实例冲突
+      const basePort = this.config.port || 18081;
+      const pid = process.pid;
+      const offset = pid % 1000;
+      let port = basePort + offset;
       let attempts = 0;
-      const maxAttempts = 10;
+      const maxAttempts = 100;
+
+      console.log(`[Gateway] PID: ${pid}, 基础端口: ${basePort}, 偏移: ${offset}`);
 
       const tryListen = () => {
         if (attempts >= maxAttempts) {
@@ -86,7 +92,7 @@ export class GatewayServer {
           this.handleRequest(req, res);
         });
 
-        server.listen(port, () => {
+        server.listen(port, '127.0.0.1', () => {
           this.server = server;
           this.config.port = port;
           console.log(`[Gateway] 监听端口: ${port}`);
