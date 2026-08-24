@@ -80,7 +80,7 @@ function registerVirtualSuppliers(pi: ExtensionAPI, config: any): void {
       api: "openai-completions",
       models,
       streamSimple: async (model: any, context: any, options: any) => {
-      return await handleVirtualSupplierRequest(vsName, config, model.id, context.messages, true);
+      return await handleVirtualSupplierRequest(vsName, config, model.id, context.messages, true, options?.signal);
     },
     });
   }

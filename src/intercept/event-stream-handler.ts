@@ -9,7 +9,8 @@ export async function handleVirtualSupplierRequest(
   config: any,
   modelId: string,
   messages: any[],
-  doStream: boolean
+  doStream: boolean,
+  signal?: AbortSignal  // ← 新增中止信号
 ) {
   const gatewayUrl = `http://127.0.0.1:${config.port}/v1/chat/completions`;
   
@@ -45,11 +46,32 @@ export async function handleVirtualSupplierRequest(
   
   (async () => {
     try {
+      // 检查是否已中止
+      if (signal?.aborted) {
+        eventStream.push({
+          type: "error",
+          reason: "aborted",
+          error: { ...output, stopReason: "aborted", errorMessage: "Request aborted" }
+        });
+        return;
+      }
+      
       const response = await fetch(gatewayUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ virtualSupplier: vsName, model: modelId, messages, doStream: true }),
+        signal,  // ← 传递中止信号
       });
+      
+      // 检查是否已中止
+      if (signal?.aborted) {
+        eventStream.push({
+          type: "error",
+          reason: "aborted",
+          error: { ...output, stopReason: "aborted", errorMessage: "Request aborted" }
+        });
+        return;
+      }
 
       if (!response.ok) {
         eventStream.push({
@@ -77,6 +99,16 @@ export async function handleVirtualSupplierRequest(
       eventStream.push({ type: "start", partial: output });
 
       while (true) {
+        // 检查是否已中止
+        if (signal?.aborted) {
+          eventStream.push({
+            type: "error",
+            reason: "aborted",
+            error: { ...output, stopReason: "aborted", errorMessage: "Request aborted" }
+          });
+          return;
+        }
+        
         const { done, value } = await reader.read();
         if (done) break;
 
@@ -147,7 +179,16 @@ export async function handleVirtualSupplierRequest(
         }
       }
 
-      // done
+      // done（检查是否已中止）
+      if (signal?.aborted) {
+        eventStream.push({
+          type: "error",
+          reason: "aborted",
+          error: { ...output, stopReason: "aborted", errorMessage: "Request aborted" }
+        });
+        return;
+      }
+      
       eventStream.push({
         type: "done",
         reason: "stop",
@@ -155,11 +196,20 @@ export async function handleVirtualSupplierRequest(
       });
 
     } catch (err) {
-      eventStream.push({
-        type: "error",
-        reason: "error",
-        error: { ...output, stopReason: "error", errorMessage: String(err) }
-      });
+      // 中止导致的错误
+      if (signal?.aborted || (err instanceof Error && err.name === "AbortError")) {
+        eventStream.push({
+          type: "error",
+          reason: "aborted",
+          error: { ...output, stopReason: "aborted", errorMessage: "Request aborted" }
+        });
+      } else {
+        eventStream.push({
+          type: "error",
+          reason: "error",
+          error: { ...output, stopReason: "error", errorMessage: String(err) }
+        });
+      }
     }
   })();
 
