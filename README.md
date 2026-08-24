@@ -2,12 +2,8 @@
 
 ## Language / 语言
 
-- [English](#english)
-- [中文](#中文)
-
----
-
-## English
+<details open>
+<summary>English</summary>
 
 A Pi Coding Agent extension that provides API gateway functionality with multi-provider support.
 
@@ -69,9 +65,12 @@ Edit `~/.pi/agent/gateway/config.json`:
 Pi → local-gateway-xxx (virtual supplier) → Gateway (:8081) → Real Provider API
 ```
 
+</details>
+
 ---
 
-## 中文
+<details>
+<summary>中文</summary>
 
 Pi 编码代理扩展，提供多供应商支持的 API 网关功能。
 
@@ -132,6 +131,8 @@ cp -r pi-api-gateway ~/.pi/agent/extensions/
 ```
 Pi → local-gateway-xxx（虚拟供应商）→ 网关 (:8081) → 真实供应商 API
 ```
+
+</details>
 
 ---
 
