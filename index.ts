@@ -1,89 +1,85 @@
 /**
- * API Gateway Plugin for Pi
+ * API Gateway Plugin - Pi 插件部分
  * 
- * 入口文件 - 启动拦截部分和网关服务
+ * 只注册供应商，不管理网关
  */
 
-import type { ExtensionAPI } from "./src/types.js";
-import { loadConfig, saveConfig } from "./src/config.js";
-import { GatewayServer } from "./src/gateway/server.js";
-import { showMainMenu } from "./src/intercept/ui/main-menu.js";
-import { handleVirtualSupplierRequest } from "./src/intercept/event-stream-handler.js";
+import type { ExtensionAPI } from "./types.js";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
-let server: GatewayServer | null = null;
+const CONFIG_DIR = path.join(
+  process.env.HOME || process.env.USERPROFILE || "",
+  ".pi",
+  "agent",
+  "gateway"
+);
+const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
+const PORT_FILE = path.join(CONFIG_DIR, "port.txt");
+
+interface RouteConfig {
+  provider: string;
+  model: string;
+  timeoutMs: number;
+  maxRetries: number;
+}
+
+interface RealProviderConfig {
+  apiKey: string;
+  baseUrl: string;
+  contextWindow: number;
+  temperature: number;
+}
+
+interface Config {
+  virtualSuppliers: Record<string, { routes: Record<string, RouteConfig> }>;
+  realProviders: Record<string, RealProviderConfig>;
+  port: number;
+}
+
+function loadConfig(): Config {
+  try {
+    const data = fs.readFileSync(CONFIG_FILE, "utf-8");
+    return JSON.parse(data);
+  } catch {
+    return { virtualSuppliers: {}, realProviders: {}, port: 18081 };
+  }
+}
+
+function getGatewayPort(): number {
+  try {
+    return parseInt(fs.readFileSync(PORT_FILE, "utf-8").trim(), 10);
+  } catch {
+    return loadConfig().port;
+  }
+}
 
 export default function (pi: ExtensionAPI) {
   const config = loadConfig();
-
-  // 注册虚拟供应商（扩展加载时，会话恢复之前）
-  registerVirtualSuppliers(pi, config);
-
-  // 启动网关（仅当选择虚拟供应商时）
-  pi.on("session_start", async (_event, ctx) => {
-    // 检查当前选择的供应商是否是虚拟供应商
-    const currentModel = ctx.model;
-    const isVirtualSupplier = currentModel && Object.keys(config.virtualSuppliers).some(
-      vsName => currentModel.provider === `local-gateway-${vsName}`
-    );
-    
-    if (isVirtualSupplier) {
-      console.log("[Gateway] 当前使用虚拟供应商，启动网关");
-      server = new GatewayServer(config);
-      await server.start();
-      registerVirtualSuppliers(pi, config);
-      ctx.ui.notify(`API 网关已启动: http://localhost:${config.port}`, "info");
-    } else {
-      console.log("[Gateway] 当前使用正常供应商，网关不启动");
-    }
-  });
-
-  // 停止网关
-  pi.on("session_shutdown", async () => {
-    if (server) {
-      await server.stop();
-      server = null;
-    }
-  });
-
-  // 注册命令
-  pi.registerCommand("gateway", {
-    description: "API 网关管理 · 配置虚拟供应商和真实供应商",
-    handler: async (_args, ctx) => {
-      const config = loadConfig();
-      await showMainMenu(pi, ctx, config);
-      saveConfig(config);
-      // 重新注册虚拟供应商
-      registerVirtualSuppliers(pi, config);
-    },
-  });
-}
-
-/**
- * 注册虚拟供应商到 Pi
- */
-function registerVirtualSuppliers(pi: ExtensionAPI, config: any): void {
-  for (const [vsName, vs] of Object.entries(config.virtualSuppliers as Record<string, any>)) {
-    const models = Object.entries(vs.routes).map(([id, route]: [string, any]) => ({
+  const port = getGatewayPort();
+  
+  // 注册虚拟供应商
+  for (const [vsName, vs] of Object.entries(config.virtualSuppliers)) {
+    const models = Object.entries(vs.routes).map(([id, route]) => ({
       id,
       name: route.model,
       reasoning: false,
       input: ["text"] as ("text" | "image")[],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: config.realProviders?.[route.provider]?.contextWindow ?? 128000,
+      contextWindow: config.realProviders[route.provider]?.contextWindow ?? 128000,
       maxTokens: 16384,
     }));
 
     pi.registerProvider(`local-gateway-${vsName}`, {
       name: `网关 (${vsName})`,
-      baseUrl: `http://localhost:${config.port}`,
+      baseUrl: `http://127.0.0.1:${port}`,
       apiKey: "key_114514",
       api: "openai-completions",
       models,
       streamSimple: async (model: any, context: any, options: any) => {
-      return await handleVirtualSupplierRequest(vsName, config, model.id, context.messages, true, options?.signal);
-    },
+        const { handleVirtualSupplierRequest } = await import("./src/intercept/event-stream-handler.js");
+        return await handleVirtualSupplierRequest(vsName, config, model.id, context.messages, true, options?.signal);
+      },
     });
   }
 }
-
-
